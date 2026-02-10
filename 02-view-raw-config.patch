@@ -1,0 +1,233 @@
+From: lihuu <lihuu@example.com>
+Date: Mon, 10 Feb 2026 00:00:00 +0000
+Subject: [PATCH 2/2] feat: Add view raw config feature
+
+This patch adds a "View Raw Config" menu item that displays the complete
+V2Ray configuration JSON. This is helpful for debugging configuration issues.
+
+Changes:
+- Added RawConfigActivity to display raw config JSON
+- Added menu item for viewing raw config
+- Added MainViewModel.createV2RayConfig helper method
+- Added necessary layout and manifest entries
+
+---
+ V2rayNG/app/src/main/AndroidManifest.xml                     |  4 +++
+ V2rayNG/app/src/main/java/com/v2ray/ang/ui/MainActivity.kt   | 22 ++++++++++++++
+ V2rayNG/app/src/main/java/com/v2ray/ang/ui/RawConfigActivity.kt   | 32 ++++++++++++++++++++
+ V2rayNG/app/src/main/java/com/v2ray/ang/viewmodel/MainViewModel.kt |  7 +++++
+ V2rayNG/app/src/main/res/layout/activity_raw_config.xml      | 24 ++++++++++++++
+ V2rayNG/app/src/main/res/menu/menu_main.xml                  |  4 +++
+ V2rayNG/app/src/main/res/values/strings.xml                  |  2 ++
+ 7 files changed, 95 insertions(+)
+
+diff --git a/V2rayNG/app/src/main/AndroidManifest.xml b/V2rayNG/app/src/main/AndroidManifest.xml
+index 1234567..abcdefg 100644
+--- a/V2rayNG/app/src/main/AndroidManifest.xml
++++ b/V2rayNG/app/src/main/AndroidManifest.xml
+@@ -150,6 +150,10 @@
+         <activity
+             android:name=".ui.AboutActivity"
+             android:exported="false" />
++        <activity
++            android:name=".ui.RawConfigActivity"
++            android:exported="false"
++            android:theme="@style/AppThemeDayNight.NoActionBar" />
+         <service
+             android:name=".service.V2RayVpnService"
+             android:exported="true"
+diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/ui/MainActivity.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/ui/MainActivity.kt
+index 1234567..abcdefg 100644
+--- a/V2rayNG/app/src/main/java/com/v2ray/ang/ui/MainActivity.kt
++++ b/V2rayNG/app/src/main/java/com/v2ray/ang/ui/MainActivity.kt
+@@ -37,6 +37,7 @@ import com.v2ray.ang.extension.toastError
+ import com.v2ray.ang.handler.AngConfigManager
+ import com.v2ray.ang.handler.MigrateManager
+ import com.v2ray.ang.handler.MmkvManager
++import com.v2ray.ang.handler.V2rayConfigManager
+ import com.v2ray.ang.helper.SimpleItemTouchHelperCallback
+ import com.v2ray.ang.handler.V2RayServiceManager
+ import com.v2ray.ang.util.Utils
+@@ -374,6 +375,26 @@ class MainActivity : HelperBaseActivity(), NavigationView.OnNavigationItemSelect
+             true
+         }
+ 
++        // View raw config page
++        R.id.view_raw_config -> {
++            val guid = MmkvManager.getSelectServer()
++            if (guid.isNullOrEmpty()) {
++                toast(R.string.title_file_chooser)
++            } else {
++                val intent = Intent(this, RawConfigActivity::class.java)
++                lifecycleScope.launch(Dispatchers.IO) {
++                    val result = mainViewModel.createV2RayConfig(this@MainActivity, guid)
++                    if (result.status) {
++                        intent.putExtra("config", result.content)
++                        startActivity(intent)
++                    } else {
++                        toast(R.string.toast_failure)
++                    }
++                }
++            }
++            true
++        }
++
+         R.id.export_all -> {
+             if (AngConfigManager.shareNonCustomConfigsToClipboard(this, mainViewModel.serversCache) == 0) {
+                 toast(R.string.toast_success)
+
+diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/ui/RawConfigActivity.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/ui/RawConfigActivity.kt
+new file mode 100644
+index 0000000..1234567
+--- /dev/null
++++ b/V2rayNG/app/src/main/java/com/v2ray/ang/ui/RawConfigActivity.kt
+@@ -0,0 +1,32 @@
++package com.v2ray.ang.ui
++
++import android.os.Bundle
++import android.view.MenuItem
++import com.v2ray.ang.R
++import com.v2ray.ang.databinding.ActivityRawConfigBinding
++
++class RawConfigActivity : BaseActivity() {
++    private lateinit var binding: ActivityRawConfigBinding
++
++    override fun onCreate(savedInstanceState: Bundle?) {
++        super.onCreate(savedInstanceState)
++        binding = ActivityRawConfigBinding.inflate(layoutInflater)
++        setContentView(binding.root)
++
++        val config = intent.getStringExtra("config")
++        binding.tvConfig.text = config
++
++        supportActionBar?.setDisplayHomeAsUpEnabled(true)
++        title = getString(R.string.title_raw_config)
++    }
++
++    override fun onOptionsItemSelected(item: MenuItem): Boolean {
++        when (item.itemId) {
++            android.R.id.home -> {
++                finish()
++                return true
++            }
++        }
++        return super.onOptionsItemSelected(item)
++    }
++}
+
+diff --git a/V2rayNG/app/src/main/java/com/v2ray/ang/viewmodel/MainViewModel.kt b/V2rayNG/app/src/main/java/com/v2ray/ang/viewmodel/MainViewModel.kt
+index 1234567..abcdefg 100644
+--- a/V2rayNG/app/src/main/java/com/v2ray/ang/viewmodel/MainViewModel.kt
++++ b/V2rayNG/app/src/main/java/com/v2ray/ang/viewmodel/MainViewModel.kt
+@@ -14,6 +14,7 @@ import androidx.lifecycle.viewModelScope
+ import com.v2ray.ang.AngApplication
+ import com.v2ray.ang.AppConfig
+ import com.v2ray.ang.R
++import com.v2ray.ang.dto.ConfigResult
+ import com.v2ray.ang.dto.ProfileItem
+ import com.v2ray.ang.dto.ServersCache
+ import com.v2ray.ang.dto.SubscriptionCache
+@@ -23,6 +24,7 @@ import com.v2ray.ang.handler.AngConfigManager
+ import com.v2ray.ang.handler.MmkvManager
+ import com.v2ray.ang.handler.SettingsManager
+ import com.v2ray.ang.handler.SpeedtestManager
++import com.v2ray.ang.handler.V2rayConfigManager
+ import com.v2ray.ang.util.MessageUtil
+ import com.v2ray.ang.util.Utils
+ import kotlinx.coroutines.CoroutineScope
+@@ -407,6 +409,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
+         }
+     }
+ 
++    // Create V2Ray config for viewing
++    fun createV2RayConfig(context: Context, guid: String): ConfigResult {
++        return V2rayConfigManager.getV2rayConfig(context, guid)
++    }
++
+     /**
+      * Initializes assets.
+      * @param assets The asset manager.
+diff --git a/V2rayNG/app/src/main/res/layout/activity_raw_config.xml b/V2rayNG/app/src/main/res/layout/activity_raw_config.xml
+new file mode 100644
+index 0000000..1234567
+--- /dev/null
++++ b/V2rayNG/app/src/main/res/layout/activity_raw_config.xml
+@@ -0,0 +1,24 @@
++<?xml version="1.0" encoding="utf-8"?>
++<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
++    xmlns:app="http://schemas.android.com/apk/res-auto"
++    xmlns:tools="http://schemas.android.com/tools"
++    android:layout_width="match_parent"
++    android:layout_height="match_parent"
++    tools:context=".ui.RawConfigActivity">
++
++    <HorizontalScrollView
++        android:layout_width="match_parent"
++        android:layout_height="wrap_content">
++
++        <TextView
++            android:id="@+id/tv_config"
++            android:layout_width="wrap_content"
++            android:layout_height="wrap_content"
++            android:padding="16dp"
++            android:typeface="monospace"
++            tools:text="{}" />
++
++    </HorizontalScrollView>
++</ScrollView>
+
+diff --git a/V2rayNG/app/src/main/res/menu/menu_main.xml b/V2rayNG/app/src/main/res/menu/menu_main.xml
+index 1234567..abcdefg 100644
+--- a/V2rayNG/app/src/main/res/menu/menu_main.xml
++++ b/V2rayNG/app/src/main/res/menu/menu_main.xml
+@@ -82,6 +82,10 @@
+             android:icon="@drawable/ic_share_24dp"
+             android:title="@string/title_export_all"
+             app:showAsAction="never" />
++        <item
++            android:id="@+id/view_raw_config"
++            android:title="@string/menu_item_view_raw_config"
++            app:showAsAction="never" />
+         <item
+             android:id="@+id/intelligent_selection_all"
+             android:title="@string/title_create_intelligent_selection_all_server"
+diff --git a/V2rayNG/app/src/main/res/values/strings.xml b/V2rayNG/app/src/main/res/values/strings.xml
+index 1234567..abcdefg 100644
+--- a/V2rayNG/app/src/main/res/values/strings.xml
++++ b/V2rayNG/app/src/main/res/values/strings.xml
+@@ -22,6 +22,8 @@
+     <string name="title_server">Config</string>
+     <string name="menu_item_add_config">Add config</string>
+     <string name="menu_item_save_config">Save config</string>
++    <string name="title_raw_config">Raw Config</string>
++    <string name="menu_item_view_raw_config">View Raw Config</string>
+     <string name="menu_item_edit_config">Edit config</string>
+     <string name="menu_item_del_config">Delete config</string>
+     <string name="menu_item_import_config_qrcode">Import from QRcode</string>
+-- 
+2.34.1
+
++            tools:text="{
++                'hello': 'world'
++            }" />
++
++    </HorizontalScrollView>
++</ScrollView>
+
+diff --git a/V2rayNG/app/src/main/res/menu/menu_main.xml b/V2rayNG/app/src/main/res/menu/menu_main.xml
+index 1234567..abcdefg 100644
+--- a/V2rayNG/app/src/main/res/menu/menu_main.xml
++++ b/V2rayNG/app/src/main/res/menu/menu_main.xml
+@@ -82,6 +82,10 @@
+             android:icon="@drawable/ic_share_24dp"
+             android:title="@string/title_export_all"
+             app:showAsAction="never" />
++        <item
++            android:id="@+id/view_raw_config"
++            android:title="@string/menu_item_view_raw_config"
++            app:showAsAction="never" />
+         <item
+             android:id="@+id/intelligent_selection_all"
+             android:title="@string/title_create_intelligent_selection_all_server"
+-- 
+2.34.1
