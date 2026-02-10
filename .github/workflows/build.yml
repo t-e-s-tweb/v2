@@ -20,6 +20,12 @@ jobs:
       with:
         submodules: 'recursive'
         fetch-depth: '0'
+        
+    - name: apply patch
+      run: |
+        chmod +x apply-patches.sh
+        ./apply-patches.sh
+    
 
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3.2.0
